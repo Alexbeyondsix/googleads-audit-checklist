@@ -1,0 +1,403 @@
+function main() {
+  // Replace with your actual spreadsheet URL
+  var SPREADSHEET_URL = "INSERT_YOUR_SPREADSHEET_URL_HERE";
+  var spreadsheet = SpreadsheetApp.openByUrl(SPREADSHEET_URL);
+  
+  // Get the reporting timeframe from Settings!C5
+  var settingsSheet = spreadsheet.getSheetByName("Settings");
+  if (!settingsSheet) return;
+  
+  var daysRange = settingsSheet.getRange("C5").getValue();
+  if (!daysRange || isNaN(daysRange)) return;
+  
+  var dateRange = getDateRange(daysRange);
+
+  exportDailyData(spreadsheet, settingsSheet, dateRange);
+  exportKeywordPerformanceData(spreadsheet, settingsSheet, dateRange);
+  exportKeywordQualityScoreData(spreadsheet, settingsSheet);
+  exportSearchTermData(spreadsheet, settingsSheet, dateRange);
+  exportProductData(spreadsheet, settingsSheet, dateRange);
+}
+
+function getDateRange(daysRange) {
+  var today = new Date();
+  var startDate = new Date();
+  startDate.setDate(today.getDate() - daysRange);
+  var endDate = new Date(today);
+  return {
+    startDate: formatDateForQuery(startDate),
+    endDate: formatDateForQuery(endDate)
+  };
+}
+
+function formatDateForQuery(date) {
+  var y = date.getFullYear();
+  var m = String(date.getMonth() + 1).padStart(2, '0');
+  var d = String(date.getDate()).padStart(2, '0');
+  return y + m + d;
+}
+
+function getWeekStartDate(date) {
+  var day = date.getDay();
+  var diff = date.getDate() - day + (day === 0 ? -6 : 1);
+  return formatDate(new Date(date.setDate(diff)));
+}
+
+function getMonthStartDate(date) {
+  return formatDate(new Date(date.getFullYear(), date.getMonth(), 1));
+}
+
+function formatDate(date) {
+  var y = date.getFullYear();
+  var m = String(date.getMonth() + 1).padStart(2, '0');
+  var d = String(date.getDate()).padStart(2, '0');
+  return y + "-" + m + "-" + d;
+}
+
+function exportDailyData(spreadsheet, settingsSheet, dateRange) {
+  var sheet = spreadsheet.getSheetByName("Daily Data");
+  if (!sheet) return;
+  sheet.clear();
+
+  var query = "SELECT Date, Impressions, Clicks, Ctr, AverageCpc, Conversions, CostPerConversion, ConversionRate, ConversionValue, Cost " +
+              "FROM ACCOUNT_PERFORMANCE_REPORT " +
+              "DURING " + dateRange.startDate + "," + dateRange.endDate + 
+              " ORDER BY Date ASC";
+
+  var report = AdsApp.report(query);
+  var rows = report.rows();
+  
+  var data = [
+    ["Day", "Week", "Month", "Impr.", "Clicks", "CTR", "Currency Code", "Avg. CPC", "Conversions", "Cost / conv", "Conv. rate", "Conv. value", "Conv. value / cost", "Cost"]
+  ];
+
+  while (rows.hasNext()) {
+    var row = rows.next();
+    var day = row["Date"];
+    var weekStart = getWeekStartDate(new Date(day));
+    var monthStart = getMonthStartDate(new Date(day));
+
+    var impressions = parseFloat(row["Impressions"].replace(/,/g, "")) || 0;
+    var clicks = parseFloat(row["Clicks"].replace(/,/g, "")) || 0;
+    var ctr = row["Ctr"];
+    var avgCpc = parseFloat(row["AverageCpc"].replace(/,/g, "")) || 0;
+    var conversions = parseFloat(row["Conversions"].replace(/,/g, "")) || 0;
+    var cpa = parseFloat(row["CostPerConversion"].replace(/,/g, "")) || 0;
+    var convRate = row["ConversionRate"];
+    var convValue = parseFloat(row["ConversionValue"].replace(/,/g, "")) || 0;
+    var cost = parseFloat(row["Cost"].replace(/,/g, "")) || 0;
+    var convValuePerCost = cost > 0 ? convValue / cost : 0;
+    
+    data.push([
+      day,
+      weekStart,
+      monthStart,
+      impressions,
+      clicks,
+      ctr,
+      "",
+      avgCpc,
+      conversions,
+      cpa,
+      convRate,
+      convValue,
+      convValuePerCost,
+      cost
+    ]);
+  }
+
+  sheet.getRange(1, 1, data.length, data[0].length).setValues(data);
+
+  var currency = settingsSheet.getRange("C6").getValue();
+  var lastRow = sheet.getLastRow();
+  var rng = sheet.getRange(2, 7, lastRow - 1, 1);
+  var vals = rng.getValues();
+  for (var i = 0; i < vals.length; i++) vals[i][0] = currency;
+  rng.setValues(vals);
+
+  sheet.getRange("O1").setValue("Total Orders");
+  sheet.getRange("P1").setValue("Website Revenue");
+}
+
+function exportKeywordPerformanceData(spreadsheet, settingsSheet, dateRange) {
+  var sheet = spreadsheet.getSheetByName("Keyword Performance Data");
+  if (!sheet) return;
+  sheet.clear();
+
+  var query = "SELECT Criteria, SystemServingStatus, KeywordMatchType, Impressions, Clicks, Ctr, AverageCpc, Conversions, CostPerConversion, ConversionRate, ConversionValue, Cost, SearchImpressionShare " +
+              "FROM KEYWORDS_PERFORMANCE_REPORT " +
+              "WHERE Impressions > 0 " +
+              "DURING " + dateRange.startDate + "," + dateRange.endDate +
+              " ORDER BY Impressions DESC";
+  
+  var report = AdsApp.report(query);
+  var rows = report.rows();
+
+  var data = [
+    ["Search Keyword", "Search Keyword Status", "Match Type", "Impr.", "Clicks", "CTR", "Currency Code", "Avg. CPC", "Conversions", "Cost / conv", "Conv. rate", "Conv. value", "Conv. value / cost", "Cost", "Search Impr. Share", "Category"]
+  ];
+
+  while (rows.hasNext()) {
+    var row = rows.next();
+    var keyword = row["Criteria"];
+    var status = row["SystemServingStatus"];
+    var matchType = row["KeywordMatchType"];
+    var impressions = parseFloat(row["Impressions"].replace(/,/g, "")) || 0;
+    var clicks = parseFloat(row["Clicks"].replace(/,/g, "")) || 0;
+    var ctr = row["Ctr"];
+    var avgCpc = parseFloat(row["AverageCpc"].replace(/,/g, "")) || 0;
+    var conversions = parseFloat(row["Conversions"].replace(/,/g, "")) || 0;
+    var cpa = parseFloat(row["CostPerConversion"].replace(/,/g, "")) || 0;
+    var convRate = row["ConversionRate"];
+    var convValue = parseFloat(row["ConversionValue"].replace(/,/g, "")) || 0;
+    var cost = parseFloat(row["Cost"].replace(/,/g, "")) || 0;
+    var share = row["SearchImpressionShare"];
+    var convValuePerCost = cost > 0 ? convValue / cost : 0;
+
+    data.push([
+      keyword,
+      status,
+      matchType,
+      impressions,
+      clicks,
+      ctr,
+      "",
+      avgCpc,
+      conversions,
+      cpa,
+      convRate,
+      convValue,
+      convValuePerCost,
+      cost,
+      share,
+      ""
+    ]);
+  }
+
+  sheet.getRange(1, 1, data.length, data[0].length).setValues(data);
+
+  var currency = settingsSheet.getRange("C6").getValue();
+  var lastRow = sheet.getLastRow();
+  var rng = sheet.getRange(2, 7, lastRow - 1, 1);
+  var vals = rng.getValues();
+  for (var i = 0; i < vals.length; i++) vals[i][0] = currency;
+  rng.setValues(vals);
+
+  var catFormula = '=ARRAYFORMULA(IF(A2:A<>"", IF(D2:D=0, IF(B2:B="eligible", "Zombie", "Not Delivering"), IF(M2:M>=\'Cost Breakdown\'!C37, "Profitable", "Not Profitable")), ""))';
+  sheet.getRange("P2").setFormula(catFormula);
+}
+
+function exportKeywordQualityScoreData(spreadsheet, settingsSheet) {
+  var sheet = spreadsheet.getSheetByName("Keyword Quality Score");
+  if (!sheet) return;
+  sheet.clear();
+  
+  var daysRange = settingsSheet.getRange("C5").getValue();
+  if (!daysRange || isNaN(daysRange)) return;
+  
+  var dateRange = getDateRange(daysRange);
+  var query = "SELECT Criteria, AdGroupName, CampaignName, KeywordMatchType, CreativeQualityScore, SearchPredictedCtr, PostClickQualityScore, QualityScore, Impressions, Clicks, Ctr, AverageCpc, Conversions, Cost, CostPerConversion, ConversionRate, ConversionValue, SystemServingStatus " +
+              "FROM KEYWORDS_PERFORMANCE_REPORT " +
+              "WHERE Impressions > 0 " +
+              "DURING " + dateRange.startDate + "," + dateRange.endDate +
+              " ORDER BY Impressions DESC";
+  
+  var report = AdsApp.report(query);
+  var rows = report.rows();
+
+  var data = [
+    ["Search Keyword", "Search Keyword Status", "Match Type", "Campaign", "Ad Group", "Ad Relevance", "Exp. CTR", "Landing Page Exp.", "Quality Score", "Impr.", "Clicks", "CTR", "Currency Code", "Avg. CPC", "Conversions", "Cost / conv", "Conv. rate", "Conv. value", "Conv. value / cost", "Cost"]
+  ];
+
+  while (rows.hasNext()) {
+    var row = rows.next();
+    var keyword = row["Criteria"];
+    var status = row["SystemServingStatus"];
+    var matchType = row["KeywordMatchType"];
+    var campaign = row["CampaignName"];
+    var adGroup = row["AdGroupName"];
+    var relevance = row["CreativeQualityScore"];
+    var expCtr = row["SearchPredictedCtr"];
+    var landPageExp = row["PostClickQualityScore"];
+    var qScore = row["QualityScore"];
+    var impressions = parseFloat(row["Impressions"].replace(/,/g, "")) || 0;
+    var clicks = parseFloat(row["Clicks"].replace(/,/g, "")) || 0;
+    var ctr = row["Ctr"];
+    var avgCpc = parseFloat(row["AverageCpc"].replace(/,/g, "")) || 0;
+    var conversions = parseFloat(row["Conversions"].replace(/,/g, "")) || 0;
+    var cost = parseFloat(row["Cost"].replace(/,/g, "")) || 0;
+    var cpa = parseFloat(row["CostPerConversion"].replace(/,/g, "")) || 0;
+    var convRate = row["ConversionRate"];
+    var convValue = parseFloat(row["ConversionValue"].replace(/,/g, "")) || 0;
+    var convValuePerCost = cost > 0 ? convValue / cost : 0;
+
+    data.push([
+      keyword,
+      status,
+      matchType,
+      campaign,
+      adGroup,
+      relevance,
+      expCtr,
+      landPageExp,
+      qScore,
+      impressions,
+      clicks,
+      ctr,
+      "",
+      avgCpc,
+      conversions,
+      cpa,
+      convRate,
+      convValue,
+      convValuePerCost,
+      cost
+    ]);
+  }
+
+  sheet.getRange(1, 1, data.length, data[0].length).setValues(data);
+  
+  var currency = settingsSheet.getRange("C6").getValue();
+  var lastRow = sheet.getLastRow();
+  var rng = sheet.getRange(2, 13, lastRow - 1, 1);
+  var vals = rng.getValues();
+  for (var i = 0; i < vals.length; i++) vals[i][0] = currency;
+  rng.setValues(vals);
+
+  // Final changed formula for WQS
+  var wqsFormula =
+    '=ARRAYFORMULA(\n' +
+    '  IF(A2:A<>"",\n' +
+    '    IF(ISNUMBER(I2:I * J2:J), I2:I * J2:J, 0),\n' +
+    '    ""\n' +
+    '  )\n' +
+    ')';
+  sheet.getRange("U2").setFormula(wqsFormula);
+  sheet.getRange("U1").setValue("WQS");
+}
+
+function exportSearchTermData(spreadsheet, settingsSheet, dateRange) {
+  var sheet = spreadsheet.getSheetByName("Search Term Data");
+  if (!sheet) return;
+  sheet.clear();
+  
+  var query = "SELECT Query, Impressions, Clicks, Ctr, AverageCpc, Conversions, CostPerConversion, ConversionRate, ConversionValue, Cost " +
+              "FROM SEARCH_QUERY_PERFORMANCE_REPORT " +
+              "WHERE Impressions > 0 " +
+              "DURING " + dateRange.startDate + "," + dateRange.endDate +
+              " ORDER BY Impressions DESC";
+  
+  var report = AdsApp.report(query);
+  var rows = report.rows();
+
+  var data = [
+    ["Search Term", "Impr.", "Clicks", "CTR", "Currency Code", "Avg. CPC", "Conversions", "Cost / conv", "Conv. rate", "Conv. value", "Conv. value / cost", "Cost"]
+  ];
+
+  while (rows.hasNext()) {
+    var row = rows.next();
+    var term = row["Query"];
+    var impressions = parseFloat(row["Impressions"].replace(/,/g, "")) || 0;
+    var clicks = parseFloat(row["Clicks"].replace(/,/g, "")) || 0;
+    var ctr = row["Ctr"];
+    var avgCpc = parseFloat(row["AverageCpc"].replace(/,/g, "")) || 0;
+    var conversions = parseFloat(row["Conversions"].replace(/,/g, "")) || 0;
+    var cpa = parseFloat(row["CostPerConversion"].replace(/,/g, "")) || 0;
+    var convRate = row["ConversionRate"];
+    var convValue = parseFloat(row["ConversionValue"].replace(/,/g, "")) || 0;
+    var cost = parseFloat(row["Cost"].replace(/,/g, "")) || 0;
+    var convValuePerCost = cost > 0 ? convValue / cost : 0;
+
+    data.push([
+      term,
+      impressions,
+      clicks,
+      ctr,
+      "",
+      avgCpc,
+      conversions,
+      cpa,
+      convRate,
+      convValue,
+      convValuePerCost,
+      cost
+    ]);
+  }
+
+  sheet.getRange(1, 1, data.length, data[0].length).setValues(data);
+
+  var currency = settingsSheet.getRange("C6").getValue();
+  var lastRow = sheet.getLastRow();
+  var rng = sheet.getRange(2, 5, lastRow - 1, 1);
+  var vals = rng.getValues();
+  for (var i = 0; i < vals.length; i++) vals[i][0] = currency;
+  rng.setValues(vals);
+
+  sheet.getRange("M1").setValue("Search Term Category");
+  var catFormula = '=ARRAYFORMULA(IF(A2:A <> "", IF(J2:J < \'Cost Breakdown\'!$C$37, "Not Profitable", "Profitable"), ""))';
+  sheet.getRange("M2").setFormula(catFormula);
+}
+
+function exportProductData(spreadsheet, settingsSheet, dateRange) {
+  var sheet = spreadsheet.getSheetByName("Product Data");
+  if (!sheet) return;
+  sheet.clear();
+
+  var query = "SELECT OfferId, ProductTitle, Impressions, Clicks, Ctr, AverageCpc, Conversions, CostPerConversion, ConversionRate, ConversionValue, Cost " +
+              "FROM SHOPPING_PERFORMANCE_REPORT " +
+              "WHERE Impressions > 0 " +
+              "DURING " + dateRange.startDate + "," + dateRange.endDate +
+              " ORDER BY Impressions DESC";
+
+  var report = AdsApp.report(query);
+  var rows = report.rows();
+
+  var data = [
+    ["Product ID", "Product Title", "Impr.", "Clicks", "CTR", "Currency Code", "Avg. CPC", "Conversions", "Cost / conv", "Conv. rate", "Conv. value", "Conv. value / cost", "Cost"]
+  ];
+
+  while (rows.hasNext()) {
+    var row = rows.next();
+    var productId = row["OfferId"];
+    var productTitle = row["ProductTitle"];
+    var impressions = parseFloat(row["Impressions"].replace(/,/g, "")) || 0;
+    var clicks = parseFloat(row["Clicks"].replace(/,/g, "")) || 0;
+    var ctr = row["Ctr"];
+    var avgCpc = parseFloat(row["AverageCpc"].replace(/,/g, "")) || 0;
+    var conversions = parseFloat(row["Conversions"].replace(/,/g, "")) || 0;
+    var cpa = parseFloat(row["CostPerConversion"].replace(/,/g, "")) || 0;
+    var convRate = row["ConversionRate"];
+    var convValue = parseFloat(row["ConversionValue"].replace(/,/g, "")) || 0;
+    var cost = parseFloat(row["Cost"].replace(/,/g, "")) || 0;
+    var convValuePerCost = cost > 0 ? convValue / cost : 0;
+
+    data.push([
+      productId,
+      productTitle,
+      impressions,
+      clicks,
+      ctr,
+      "",
+      avgCpc,
+      conversions,
+      cpa,
+      convRate,
+      convValue,
+      convValuePerCost,
+      cost
+    ]);
+  }
+
+  sheet.getRange(1, 1, data.length, data[0].length).setValues(data);
+
+  var currency = settingsSheet.getRange("C6").getValue();
+  var lastRow = sheet.getLastRow();
+  var rng = sheet.getRange(2, 6, lastRow - 1, 1);
+  var vals = rng.getValues();
+  for (var i = 0; i < vals.length; i++) vals[i][0] = currency;
+  rng.setValues(vals);
+
+  sheet.getRange("N1").setValue("Product Category");
+  var catFormula = '=ARRAYFORMULA(IF(A2:A<>"", IF(D2:D=0, "Zero Clicks", IF(L2:L>=\'Cost Breakdown\'!$C$37, "Profitable", "Not Profitable")), ""))';
+  sheet.getRange("N2").setFormula(catFormula);
+}
